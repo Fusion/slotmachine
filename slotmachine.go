@@ -15,8 +15,8 @@ const (
 )
 
 type Boundaries struct {
-	lower int
-	upper int
+	Lower int
+	Upper int
 }
 
 type SlotMachine[T constraints.Integer, V any] struct {
@@ -80,8 +80,8 @@ func New[T constraints.Integer, V any](
 
 func (s *SlotMachine[T, V]) DumpLayout() {
 	width := len(*s.slice)
-	fmt.Printf("Slice size: %d (Usable slots: %d - %d)\n", width, (*s).boundaries.lower, (*s).boundaries.upper)
-    fmt.Printf("Bucket size: %d\n", (*s).bucketSize)
+	fmt.Printf("Slice size: %d (Usable slots: %d - %d)\n", width, (*s).boundaries.Lower, (*s).boundaries.Upper)
+	fmt.Printf("Bucket size: %d\n", (*s).bucketSize)
 	for {
 		bucketCount := width / int(s.bucketSize)
 		if bucketCount == 0 {
@@ -96,7 +96,7 @@ func (s *SlotMachine[T, V]) DumpLayout() {
 }
 
 func (s *SlotMachine[T, V]) checkBoundaries(slotidx T) Validated {
-	if slotidx < T(s.boundaries.lower) || slotidx > T(s.boundaries.upper) {
+	if slotidx < T(s.boundaries.Lower) || slotidx > T(s.boundaries.Upper) {
 		return OutOfBound
 	}
 	return InBound
