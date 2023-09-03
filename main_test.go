@@ -91,6 +91,25 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 		t.Error("result should be 0", added)
 	}
 	sm.DumpLayout()
+
+	sm2, _ := New[T, V](
+		workSlice,
+		0,
+		uint8(bucketSize),
+		boundaries)
+	for i := 0; i < 1000; i++ {
+		sm2.Set(T(i), V(i))
+	}
+    addedbunch, err := sm2.SyncBookAndSetBatch(5, V(v))
+	if err != nil {
+		t.Error("unable to call SyncBookAndSetBatch", err)
+    } else {
+        for i := 0; i < 5; i++ {
+            if int(addedbunch[i]) != 1000 + i {
+                t.Error("result should be 1000 + i", addedbunch[i])
+            }
+        }
+	}
 }
 
 func (s *SMTester[T, V]) DefaultTest(t *testing.T, sliceSize int, bucketSize int, boundaries *Boundaries) {

@@ -168,27 +168,10 @@ func (s *SlotMachine[T, V]) Unset(slotidx T) error {
 	return nil
 }
 
-func (s *SlotMachine[T, V]) SyncSet(slotidx T, value V) error {
-	(*s).m.Lock()
-	defer (*s).m.Unlock()
-
-	return s.Set(slotidx, value)
-}
-
-func (s *SlotMachine[T, V]) SyncUnset(slotidx T) error {
-	(*s).m.Lock()
-	defer (*s).m.Unlock()
-
-	return s.Unset(slotidx)
-}
-
-func (s *SlotMachine[T, V]) SyncBookAndSet(value V) (T, error) {
+func (s *SlotMachine[T, V]) BookAndSet(value V) (T, error) {
 	var level []T
 	var found bool
 	var bucket int
-
-	(*s).m.Lock()
-	defer (*s).m.Unlock()
 
 	for levelidx := 0; levelidx < len(*s.bucketLevels); levelidx++ {
 		found = false
@@ -226,4 +209,41 @@ func (s *SlotMachine[T, V]) SyncBookAndSet(value V) (T, error) {
 		}
 	}
 	return 0, fmt.Errorf("SlotMachine: No usable slot")
+}
+
+func (s *SlotMachine[T, V]) SyncSet(slotidx T, value V) error {
+	(*s).m.Lock()
+	defer (*s).m.Unlock()
+
+	return s.Set(slotidx, value)
+}
+
+func (s *SlotMachine[T, V]) SyncUnset(slotidx T) error {
+	(*s).m.Lock()
+	defer (*s).m.Unlock()
+
+	return s.Unset(slotidx)
+}
+
+func (s *SlotMachine[T, V]) SyncBookAndSet(value V) (T, error) {
+	(*s).m.Lock()
+	defer (*s).m.Unlock()
+
+	return s.BookAndSet(value)
+}
+
+func (s *SlotMachine[T, V]) SyncBookAndSetBatch(slotcount T, value V) ([]T, error) {
+	(*s).m.Lock()
+	defer (*s).m.Unlock()
+
+	slots := []T{}
+	for i := 0; i < int(slotcount); i++ {
+		n, err := s.BookAndSet(value)
+		if err != nil {
+			return nil, err
+		}
+		slots = append(slots, n)
+	}
+
+	return slots, nil
 }

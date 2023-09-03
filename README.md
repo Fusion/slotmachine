@@ -17,6 +17,8 @@ Therefore, using this librry beyond its "slot available?" scope could prove a bi
 
 Short explanation: this is due to Generics not (yet?) supporting declaring types in method signatures.
 
+TODO LOWER BOUNDARY WILL PREVENT ALLOCATING UNTIL FIXED
+
 # Usage
 
 Import:
@@ -40,7 +42,7 @@ This has a direct impact on the number of buckets and layers.
 You can play with this setting to achieve maximum performance, based on your slice size.
 
 ```
-workSlice := make([]uint16, 32768)
+workSlice, err := make([]uint16, 32768)
 sm := slotmachine.New[uint16, uint16](
     &workSlice,
     0,
@@ -50,12 +52,12 @@ sm := slotmachine.New[uint16, uint16](
 
 For performance reasons, the library insists on workSlice's size, as well as bucketSize's value, being powers of 2. However, you may limit your usable slot range using boundaries:
 ```
-workSlice := make([]uint16, 65536)
+workSlice, err := make([]uint16, 65536)
 sm := slotmachine.New[uint16, uint16](
     &workSlice,
     0,
     uint8(bucketSize),
-    &Boundaries{5000, 50000})
+    &slotmachine.Boundaries{5000, 50000})
 ```
 
 Directly booking and setting a slot:
