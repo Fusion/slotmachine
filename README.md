@@ -44,13 +44,25 @@ You can play with this setting to achieve maximum performance, based on your sli
     sm := slotmachine.New[uint16, uint16](
         &workSlice,
         0,
-        uint8(bucketSize))
+        uint8(bucketSize),
+        nil)
+```
+
+For performance reasons, the library insists on workSlice's size, as well as bucketSize's value, being powers of 2. However, you may limit your usable slot range using boundaries:
+```
+    workSlice := make([]uint16, 65536)
+    sm := slotmachine.New[uint16, uint16](
+        &workSlice,
+        0,
+        uint8(bucketSize),
+        &Boundaries{5000, 50000})
 ```
 
 Directly booking and setting a slot:
 ```
     sm.Set(uint16(i), 1)
 ```
+Note: you can check that this call was successful, being within pre-defined boundaries, etc., if it returns an error.
 
 Releasing a slot:
 ```
@@ -61,6 +73,7 @@ Finding and booking a slot:
 ```
     added, err := sm.SyncBookAndSet(2)
 ```
+This call will return an error about the slice being full if you have used all the slots within your defined boundaries.
 
 More synchronized calls:
 ```
@@ -70,13 +83,18 @@ More synchronized calls:
 
 # FAQ
 
-Q: How does this work?
+**Q: How does this work?**
 
-A: The library maintains a reference to your "managed" slice. It builds several representational layers, increasingly smaller, to create a "path" to the slice's slots.
+A: The library maintains a reference to your "managed" slice.
+
+It builds several representational layers, increasingly smaller, to create a "path" to the slice's slots.
+
 As each layer's buckets fill up, their parent layers are updated, and fill up as well. This allows us to find an empty slot very fast by avoiding "traffic jams."
+
 This library eschews the use of trees to preserve maximum locality, and thus memory access performance.
 
-Q: Is this memory efficient?
+**Q: Is this memory efficient?**
 
-A: Somewhat. It could always improve, though. The only guarantee is that your storage size will be no worse than going from O(N) to O(Nlogn)
-Note that you can improve memory usage by aligning bucket width to memory words, as I am using bitwise arithmetics.
+A: Somewhat. It could always improve, though.
+
+The only guarantee is that your storage size will be no worse than going from O(N) to O(Nlogn)

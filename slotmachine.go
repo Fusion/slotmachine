@@ -3,15 +3,29 @@ package slotmachine
 import (
 	"fmt"
 	"golang.org/x/exp/constraints"
+	"math"
 	"sync"
 )
+
+type Validated uint8
+
+const (
+	InBound Validated = iota
+	OutOfBound
+)
+
+type Boundaries struct {
+	lower int
+	upper int
+}
 
 type SlotMachine[T constraints.Integer, V any] struct {
 	slice        *[]V
 	empty        V
-	bucketSize   uint8
-	full         uint16
-	bucketLevels *[][]uint16
+	boundaries   Boundaries
+	bucketSize   uint8 // A bucket can only be as wide as an integer type's number of bits...
+	full         T
+	bucketLevels *[][]T
 	m            sync.Mutex
 	debug        bool
 }
@@ -20,18 +34,37 @@ func New[T constraints.Integer, V any](
 	slice *[]V,
 	empty V,
 	bucketSize uint8,
-) *SlotMachine[T, V] {
+	boundaries *Boundaries,
+) (*SlotMachine[T, V], error) {
 
-	var bucketLevels [][]uint16
+	if math.Ceil(math.Log2(float64(bucketSize))) != math.Floor(math.Log2(float64(bucketSize))) {
+		return nil, fmt.Errorf("bucket size must be a power of 2")
+	}
 	width := len(*slice)
+	if math.Ceil(math.Log2(float64(width))) != math.Floor(math.Log2(float64(width))) {
+		return nil, fmt.Errorf("for performance, the slice's size needs to be 2-aligned; suggest you resize to %d and set upper bound",
+			int(math.Pow(2.0, math.Ceil(math.Log2(float64(len(*slice)))))))
+	}
+
+	var bucketLevels [][]T
 	for {
 		bucketCount := width / int(bucketSize)
-		buckets := make([]uint16, bucketCount)
-		bucketLevels = append([][]uint16{buckets}, bucketLevels...)
+		if bucketCount == 0 {
+			bucketCount = 1
+		}
+		buckets := make([]T, bucketCount)
+		bucketLevels = append([][]T{buckets}, bucketLevels...)
 		if bucketCount == 1 {
 			break
 		}
 		width = bucketCount
+	}
+
+	var bdrs Boundaries
+	if boundaries != nil {
+		bdrs = *boundaries
+	} else {
+		bdrs = Boundaries{0, len(*slice) - 1}
 	}
 
 	bucketFull := (1 << bucketSize) - 1
@@ -39,12 +72,24 @@ func New[T constraints.Integer, V any](
 		slice:        slice,
 		empty:        empty,
 		bucketSize:   bucketSize,
-		full:         uint16(bucketFull),
+		full:         T(bucketFull),
 		bucketLevels: &bucketLevels,
-	}
+		boundaries:   bdrs,
+	}, nil
 }
 
-func (s *SlotMachine[T, V]) Set(slotidx T, value V) {
+func (s *SlotMachine[T, V]) checkBoundaries(slotidx T) Validated {
+	if slotidx < T(s.boundaries.lower) || slotidx > T(s.boundaries.upper) {
+		return OutOfBound
+	}
+	return InBound
+}
+
+func (s *SlotMachine[T, V]) Set(slotidx T, value V) error {
+	if s.checkBoundaries(slotidx) == OutOfBound {
+		return fmt.Errorf("slot index %d is out of bounds", slotidx)
+	}
+
 	(*s.slice)[slotidx] = value
 
 	level := (*s.bucketLevels)[len(*s.bucketLevels)-1]
@@ -53,7 +98,7 @@ func (s *SlotMachine[T, V]) Set(slotidx T, value V) {
 	level[bucket] |= (1 << offset)
 
 	if level[bucket] != (*s).full {
-		return
+		return nil
 	}
 	if (*s).debug {
 		fmt.Printf("bucketfull, (full=%d) slotidx=%d -> bucket=%d (width=%d), bounds=%d-%d\n", level[bucket], slotidx, bucket, len(level), bucket*slicesize, bucket*slicesize+slicesize-1)
@@ -71,9 +116,15 @@ func (s *SlotMachine[T, V]) Set(slotidx T, value V) {
 			fmt.Printf("parent bucket is %d, slicesize=%d, bounds=%d-%d offset=%d newv=%d\n", bucket, slicesize, bucket*slicesize, bucket*slicesize+slicesize-1, offset, level[bucket])
 		}
 	}
+
+	return nil
 }
 
-func (s *SlotMachine[T, V]) Unset(slotidx T) {
+func (s *SlotMachine[T, V]) Unset(slotidx T) error {
+	if s.checkBoundaries(slotidx) == OutOfBound {
+		return fmt.Errorf("slot index %d is out of bounds", slotidx)
+	}
+
 	emptyVal := (*s).empty
 	var emptyIf any = emptyVal
 	(*s.slice)[slotidx] = emptyIf.(V)
@@ -84,7 +135,7 @@ func (s *SlotMachine[T, V]) Unset(slotidx T) {
 	level[bucket] &^= (1 << offset)
 
 	if level[bucket] == (*s).full {
-		return
+		return nil
 	}
 	for levelidx := len(*s.bucketLevels) - 2; levelidx >= 0; levelidx-- {
 		level = (*s.bucketLevels)[levelidx]
@@ -96,24 +147,26 @@ func (s *SlotMachine[T, V]) Unset(slotidx T) {
 			break
 		}
 	}
+
+	return nil
 }
 
-func (s *SlotMachine[T, V]) SyncSet(slotidx T, value V) {
+func (s *SlotMachine[T, V]) SyncSet(slotidx T, value V) error {
 	(*s).m.Lock()
 	defer (*s).m.Unlock()
 
-	s.Set(slotidx, value)
+	return s.Set(slotidx, value)
 }
 
-func (s *SlotMachine[T, V]) SyncUnset(slotidx T) {
+func (s *SlotMachine[T, V]) SyncUnset(slotidx T) error {
 	(*s).m.Lock()
 	defer (*s).m.Unlock()
 
-	s.Unset(slotidx)
+	return s.Unset(slotidx)
 }
 
 func (s *SlotMachine[T, V]) SyncBookAndSet(value V) (T, error) {
-	var level []uint16
+	var level []T
 	var found bool
 	var bucket int
 
@@ -149,7 +202,9 @@ func (s *SlotMachine[T, V]) SyncBookAndSet(value V) (T, error) {
 	for i := 0; i < +slicesize; i++ {
 		if level[bucket]&(1<<i) == 0 {
 			slot := position + i
-			s.Set(T(slot), value)
+			if s.Set(T(slot), value) != nil {
+				return 0, fmt.Errorf("SlotMachine: No usable slot")
+			}
 			return T(slot), nil
 		}
 	}
