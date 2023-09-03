@@ -78,6 +78,23 @@ func New[T constraints.Integer, V any](
 	}, nil
 }
 
+func (s *SlotMachine[T, V]) DumpLayout() {
+	width := len(*s.slice)
+	fmt.Printf("Slice size: %d (Usable slots: %d - %d)\n", width, (*s).boundaries.lower, (*s).boundaries.upper)
+    fmt.Printf("Bucket size: %d\n", (*s).bucketSize)
+	for {
+		bucketCount := width / int(s.bucketSize)
+		if bucketCount == 0 {
+			bucketCount = 1
+		}
+		fmt.Printf("Buckets per level: %d\n", bucketCount)
+		if bucketCount == 1 {
+			break
+		}
+		width = bucketCount
+	}
+}
+
 func (s *SlotMachine[T, V]) checkBoundaries(slotidx T) Validated {
 	if slotidx < T(s.boundaries.lower) || slotidx > T(s.boundaries.upper) {
 		return OutOfBound

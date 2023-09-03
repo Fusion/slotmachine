@@ -90,6 +90,7 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 	} else if added != 0 {
 		t.Error("result should be 0", added)
 	}
+	sm.DumpLayout()
 }
 
 func (s *SMTester[T, V]) DefaultTest(t *testing.T, sliceSize int, bucketSize int, boundaries *Boundaries) {

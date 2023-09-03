@@ -40,46 +40,52 @@ This has a direct impact on the number of buckets and layers.
 You can play with this setting to achieve maximum performance, based on your slice size.
 
 ```
-    workSlice := make([]uint16, 32768)
-    sm := slotmachine.New[uint16, uint16](
-        &workSlice,
-        0,
-        uint8(bucketSize),
-        nil)
+workSlice := make([]uint16, 32768)
+sm := slotmachine.New[uint16, uint16](
+    &workSlice,
+    0,
+    uint8(bucketSize),
+    nil)
 ```
 
 For performance reasons, the library insists on workSlice's size, as well as bucketSize's value, being powers of 2. However, you may limit your usable slot range using boundaries:
 ```
-    workSlice := make([]uint16, 65536)
-    sm := slotmachine.New[uint16, uint16](
-        &workSlice,
-        0,
-        uint8(bucketSize),
-        &Boundaries{5000, 50000})
+workSlice := make([]uint16, 65536)
+sm := slotmachine.New[uint16, uint16](
+    &workSlice,
+    0,
+    uint8(bucketSize),
+    &Boundaries{5000, 50000})
 ```
 
 Directly booking and setting a slot:
 ```
-    sm.Set(uint16(i), 1)
+sm.Set(uint16(i), 1)
 ```
 Note: you can check that this call was successful, being within pre-defined boundaries, etc., if it returns an error.
 
 Releasing a slot:
 ```
-    sm.Unset(uint16(i))
+sm.Unset(uint16(i))
 ```
 
 Finding and booking a slot:
 ```
-    added, err := sm.SyncBookAndSet(2)
+added, err := sm.SyncBookAndSet(2)
 ```
 This call will return an error about the slice being full if you have used all the slots within your defined boundaries.
 
 More synchronized calls:
 ```
-    sm.SyncSet(uint16(i), 1)
-    sm.SyncUnset(uint16(i))
+sm.SyncSet(uint16(i), 1)
+sm.SyncUnset(uint16(i))
 ```
+
+To get a sense of the performance, both processing and storage-wise, that you are getting, based on your settings:
+```
+sm.DumpLayout()
+```
+This will display information such as number of layers, number  of buckets per layer, etc.
 
 # FAQ
 
