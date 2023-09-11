@@ -95,7 +95,6 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 	} else if added != 0 {
 		t.Error("result should be 0", added)
 	}
-	sm.DumpLayout()
 
 	sm2, _ := New[T, V](
 		SyncConcurrency,
@@ -153,24 +152,103 @@ func TestBucketSizeIs16Boundaries(t *testing.T) {
 	tester.DefaultTest(t, 65536, 16, &Boundaries{0, 50000})
 }
 
-func boringRoutine(idx int, t *testing.T) {
-	counter := 0
-	for i := 0; i < 100000; i++ {
-		counter++
-		time.Sleep(time.Second * 1)
-		t.Logf("counter#%d: %d", idx, counter)
-	}
-}
-
-func TestBucketSizeIs8Concurrent(t *testing.T) {
-	if 1 == 1 {
-		return
-	}
-	t.Log("Testing a bucket size of 8, in a highly concurrent environment")
+func testConcurrent(t *testing.T, sm SlotMachine[uint32, uint16], threads int, batchSize int) {
 	var wg sync.WaitGroup
-	wg.Add(2)
-	for i := 0; i < 200; i++ {
-		go boringRoutine(i, t)
+	wg.Add(threads)
+	for i := 0; i < threads; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			counter := 0
+			for i := 0; i < batchSize; i++ {
+				added, err := sm.BookAndSet(uint16(i))
+				if err != nil {
+					t.Error(err)
+				}
+				counter++
+				if added == 0 {
+				}
+				//t.Logf("counter#%d: %d", idx, added)
+			}
+		}(i)
 	}
 	wg.Wait()
+}
+
+func TestBucketSizeIs8ConcurrentSync(t *testing.T) {
+	t.Log("Testing a bucket size of 8, in a highly concurrent environment (sync)")
+
+	workSlice := make([]uint16, 524288)
+	sm, err := New[uint32, uint16](
+		SyncConcurrency,
+		&workSlice,
+		0,
+		uint8(8),
+		&Boundaries{0, 520000})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	start := time.Now()
+	testConcurrent(t, sm, 50000, 10)
+	t.Logf("Time elapsed: %s", time.Since(start))
+}
+
+func TestBucketSizeIs8ConcurrentChan(t *testing.T) {
+	t.Log("Testing a bucket size of 8, in a highly concurrent environment (channel)")
+
+	workSlice := make([]uint16, 524288)
+	sm, err := New[uint32, uint16](
+		ChannelConcurrency,
+		&workSlice,
+		0,
+		uint8(8),
+		&Boundaries{0, 520000})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	start := time.Now()
+	testConcurrent(t, sm, 50000, 10)
+	t.Logf("Time elapsed: %s", time.Since(start))
+}
+
+func TestBucketSizeIs8Sequential(t *testing.T) {
+	t.Log("Testing a bucket size of 8, in a sequential environment, for reference")
+
+	workSlice := make([]uint16, 524288)
+	sm, err := New[uint32, uint16](
+		NoConcurrency,
+		&workSlice,
+		0,
+		uint8(8),
+		&Boundaries{0, 520000})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	start := time.Now()
+	testConcurrent(t, sm, 1, 500000)
+	t.Logf("Time elapsed: %s", time.Since(start))
+}
+
+func TestBucketSizeIs8Pretend(t *testing.T) {
+	t.Log("Testing a bucket size of 8, in a pretend environment, where I just count, for shame")
+
+	workSlice := make([]uint16, 524288)
+
+	start := time.Now()
+	for i := 0; i < 50000; i++ {
+		for j := 0; j < 10; j++ {
+			workSlice[i*j] = 1
+			if i*j > 2 {
+				if workSlice[i*j] == workSlice[i*j-1]*workSlice[i*j-2]+1 {
+					t.Log("ping!")
+				}
+			}
+		}
+	}
+	t.Logf("Time elapsed: %s", time.Since(start))
 }

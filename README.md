@@ -44,6 +44,7 @@ You can play with this setting to achieve maximum performance, based on your sli
 ```
 workSlice, err := make([]uint16, 32768)
 sm := slotmachine.New[uint16, uint16](
+    ChannelConcurrency,
     &workSlice,
     0,
     uint8(bucketSize),
@@ -54,6 +55,7 @@ For performance reasons, the library insists on workSlice's size, as well as buc
 ```
 workSlice, err := make([]uint16, 65536)
 sm := slotmachine.New[uint16, uint16](
+    ChannelConcurrency,
     &workSlice,
     0,
     uint8(bucketSize),
@@ -73,15 +75,25 @@ sm.Unset(uint16(i))
 
 Finding and booking a slot:
 ```
-added, err := sm.SyncBookAndSet(2)
+added, err := sm.BookAndSet(2)
 ```
 This call will return an error about the slice being full if you have used all the slots within your defined boundaries.
 
-More synchronized calls:
-```
-sm.SyncSet(uint16(i), 1)
-sm.SyncUnset(uint16(i))
-```
+In the previous examples, I have used ChannelConcurrency as my concurrency model of choice.
+
+In some instances, e.g. when creating a massive number of goroutines, mutexes can go in "starvation mode" due to the active goroutines not holding the mutex.
+
+In other cases, you may need the flexibility of using a simple mutex, and not need channels.
+
+Finally, you may also not need any concurrency management at all.
+
+For these reasons, you can ask the library to follow one of three concurrency models:
+
+- `NoConcurrency`
+- `SyncConcurrency`
+- `ChannelConcurrency`
+
+Try different concurrency models and pick the one that works best for your use case!
 
 To get a sense of the performance, both processing and storage-wise, that you are getting, based on your settings:
 ```

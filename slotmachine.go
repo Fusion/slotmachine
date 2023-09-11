@@ -187,26 +187,6 @@ func (s *SlotMachineStruct[T, V]) bookAndSet(value V) (T, error) {
 	return 0, fmt.Errorf("SlotMachine: No usable slot")
 }
 
-type NoConcurrencySlotMachine[T constraints.Integer, V any] struct {
-	st SlotMachineStruct[T, V]
-}
-
-func (s *NoConcurrencySlotMachine[T, V]) Init(
-	slice *[]V,
-	empty V,
-	bucketSize uint8,
-	full T,
-	bucketLevels *[][]T,
-	boundaries *Boundaries,
-) {
-	s.st.slice = slice
-	s.st.empty = empty
-	s.st.bucketSize = bucketSize
-	s.st.full = T(full)
-	s.st.bucketLevels = bucketLevels
-	s.st.boundaries = *boundaries
-}
-
 func New[T constraints.Integer, V any](
 	cmodel ConcurrencyModel,
 	slice *[]V,
@@ -259,8 +239,8 @@ func New[T constraints.Integer, V any](
 			bdrs,
 		)
 		return &sm, nil
-	default:
-		sm := NoConcurrencySlotMachine[T, V]{}
+	case SyncConcurrency:
+		sm := SyncConcurrencySlotMachine[T, V]{}
 		sm.Init(
 			slice,
 			empty,
@@ -270,31 +250,113 @@ func New[T constraints.Integer, V any](
 			bdrs,
 		)
 		return &sm, nil
+	case ChannelConcurrency:
+		sm := ChannelConcurrencySlotMachine[T, V]{}
+		sm.Init(
+			slice,
+			empty,
+			bucketSize,
+			T(bucketFull),
+			&bucketLevels,
+			bdrs,
+		)
+		return &sm, nil
+	default:
+		return nil, fmt.Errorf("Unknown concurrency model")
 	}
 }
 
+type NoConcurrencySlotMachine[T constraints.Integer, V any] struct {
+	st SlotMachineStruct[T, V]
+}
+
+func (s *NoConcurrencySlotMachine[T, V]) Init(
+	slice *[]V,
+	empty V,
+	bucketSize uint8,
+	full T,
+	bucketLevels *[][]T,
+	boundaries *Boundaries,
+) {
+	s.st.slice = slice
+	s.st.empty = empty
+	s.st.bucketSize = bucketSize
+	s.st.full = T(full)
+	s.st.bucketLevels = bucketLevels
+	s.st.boundaries = *boundaries
+}
+
 func (s *NoConcurrencySlotMachine[T, V]) Set(slotidx T, value V) error {
+	return s.st.set(slotidx, value)
+}
+
+func (s *NoConcurrencySlotMachine[T, V]) Unset(slotidx T) error {
+	return s.st.unset(slotidx)
+}
+
+func (s *NoConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, error) {
+	return s.st.bookAndSet(value)
+}
+
+func (s *NoConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, error) {
+	slots := []T{}
+	for i := 0; i < int(slotcount); i++ {
+		n, err := s.st.bookAndSet(value)
+		if err != nil {
+			return nil, err
+		}
+		slots = append(slots, n)
+	}
+
+	return slots, nil
+}
+
+func (s *NoConcurrencySlotMachine[T, V]) DumpLayout() {
+	s.st.DumpLayout()
+}
+
+type SyncConcurrencySlotMachine[T constraints.Integer, V any] struct {
+	st SlotMachineStruct[T, V]
+}
+
+func (s *SyncConcurrencySlotMachine[T, V]) Init(
+	slice *[]V,
+	empty V,
+	bucketSize uint8,
+	full T,
+	bucketLevels *[][]T,
+	boundaries *Boundaries,
+) {
+	s.st.slice = slice
+	s.st.empty = empty
+	s.st.bucketSize = bucketSize
+	s.st.full = T(full)
+	s.st.bucketLevels = bucketLevels
+	s.st.boundaries = *boundaries
+}
+
+func (s *SyncConcurrencySlotMachine[T, V]) Set(slotidx T, value V) error {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
 	return s.st.set(slotidx, value)
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) Unset(slotidx T) error {
+func (s *SyncConcurrencySlotMachine[T, V]) Unset(slotidx T) error {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
 	return s.st.unset(slotidx)
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, error) {
+func (s *SyncConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, error) {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
 	return s.st.bookAndSet(value)
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, error) {
+func (s *SyncConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, error) {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
@@ -310,6 +372,109 @@ func (s *NoConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) (
 	return slots, nil
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) DumpLayout() {
+func (s *SyncConcurrencySlotMachine[T, V]) DumpLayout() {
+	s.st.DumpLayout()
+}
+
+type TransactionType uint8
+
+const (
+	TransactionSet TransactionType = iota
+	TransactionUnset
+	TransactionBookAndSet
+)
+
+type response[T constraints.Integer] struct {
+	slotidx *T
+	err     *error
+}
+
+type transact[T constraints.Integer, V any] struct {
+	ttype    TransactionType
+	slotidx  T
+	value    V
+	response chan response[T]
+}
+
+type ChannelConcurrencySlotMachine[T constraints.Integer, V any] struct {
+	st         SlotMachineStruct[T, V]
+	transactor chan *transact[T, V]
+}
+
+func (s *ChannelConcurrencySlotMachine[T, V]) Init(
+	slice *[]V,
+	empty V,
+	bucketSize uint8,
+	full T,
+	bucketLevels *[][]T,
+	boundaries *Boundaries,
+) {
+	s.st.slice = slice
+	s.st.empty = empty
+	s.st.bucketSize = bucketSize
+	s.st.full = T(full)
+	s.st.bucketLevels = bucketLevels
+	s.st.boundaries = *boundaries
+
+	s.transactor = make(chan *transact[T, V], 8)
+	go func() {
+		for {
+			select {
+			case transaction := <-s.transactor:
+				switch transaction.ttype {
+				case TransactionSet:
+					err := s.st.set(transaction.slotidx, transaction.value)
+					transaction.response <- response[T]{nil, &err}
+				case TransactionUnset:
+					err := s.st.unset(transaction.slotidx)
+					transaction.response <- response[T]{nil, &err}
+				case TransactionBookAndSet:
+					n, err := s.st.bookAndSet(transaction.value)
+					transaction.response <- response[T]{&n, &err}
+				}
+			}
+		}
+	}()
+}
+
+func (s *ChannelConcurrencySlotMachine[T, V]) Set(slotidx T, value V) error {
+	tr := &transact[T, V]{ttype: TransactionSet, slotidx: slotidx, value: value, response: make(chan response[T])}
+	s.transactor <- tr
+	response := <-tr.response
+	return *response.err
+}
+
+func (s *ChannelConcurrencySlotMachine[T, V]) Unset(slotidx T) error {
+	tr := &transact[T, V]{ttype: TransactionUnset, slotidx: slotidx, response: make(chan response[T])}
+	s.transactor <- tr
+	response := <-tr.response
+	return *response.err
+}
+
+func (s *ChannelConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, error) {
+	tr := &transact[T, V]{ttype: TransactionBookAndSet, value: value, response: make(chan response[T])}
+	s.transactor <- tr
+	response := <-tr.response
+	return *response.slotidx, *response.err
+}
+
+// Warning! At this time, this  function does not return consecutive slots -- it should when using Sync
+func (s *ChannelConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, error) {
+	slots := []T{}
+	for i := 0; i < int(slotcount); i++ {
+		tr := &transact[T, V]{ttype: TransactionBookAndSet, value: value, response: make(chan response[T])}
+		s.transactor <- tr
+		response := <-tr.response
+		n, err := *response.slotidx, *response.err
+		if err != nil {
+			return nil, err
+		}
+		slots = append(slots, n)
+	}
+
+	return slots, nil
+}
+
+func (s *ChannelConcurrencySlotMachine[T, V]) DumpLayout() {
 	s.st.DumpLayout()
 }
