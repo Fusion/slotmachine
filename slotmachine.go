@@ -130,7 +130,7 @@ func (s *SlotMachineStruct[T, V]) unset(slotidx T) (T, error) {
 	bucket, offset := int(slotidx)/slicesize, int(slotidx)%slicesize
 	level[bucket] &^= (1 << offset)
 
-	s.available--
+	s.available++
 
 	if level[bucket] == (*s).full {
 		return s.available, nil
