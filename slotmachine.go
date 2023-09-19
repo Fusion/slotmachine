@@ -445,7 +445,7 @@ func (s *ChannelConcurrencySlotMachine[T, V]) Init(
 					available, err := s.st.unset(transaction.slotidx)
 					transaction.response <- response[T]{nil, available, &err}
 				case TransactionBookAndSet:
-					available, n, err := s.st.bookAndSet(transaction.value)
+					n, available, err := s.st.bookAndSet(transaction.value)
 					transaction.response <- response[T]{&n, available, &err}
 				}
 			}
