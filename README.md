@@ -44,7 +44,7 @@ You can play with this setting to achieve maximum performance, based on your sli
 ```
 workSlice, err := make([]uint16, 32768)
 sm := slotmachine.New[uint16, uint16](
-    ChannelConcurrency,
+    slotmachine.ChannelConcurrency,
     &workSlice,
     0,
     uint8(bucketSize),
@@ -55,7 +55,7 @@ For performance reasons, the library insists on workSlice's size, as well as buc
 ```
 workSlice, err := make([]uint16, 65536)
 sm := slotmachine.New[uint16, uint16](
-    ChannelConcurrency,
+    slotmachine.ChannelConcurrency,
     &workSlice,
     0,
     uint8(bucketSize),
@@ -64,18 +64,18 @@ sm := slotmachine.New[uint16, uint16](
 
 Directly booking and setting a slot:
 ```
-sm.Set(uint16(i), 1)
+available, err := sm.Set(uint16(i), 1)
 ```
 Note: you can check that this call was successful, being within pre-defined boundaries, etc., if it returns an error.
 
 Releasing a slot:
 ```
-sm.Unset(uint16(i))
+available, err := sm.Unset(uint16(i))
 ```
 
 Finding and booking a slot:
 ```
-added, err := sm.BookAndSet(2)
+added, available, err := sm.BookAndSet(2)
 ```
 This call will return an error about the slice being full if you have used all the slots within your defined boundaries.
 

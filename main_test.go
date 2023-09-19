@@ -13,6 +13,14 @@ type SMTester[T constraints.Integer, V constraints.Integer] struct {
 }
 
 func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, bucketSize int, boundaries *Boundaries) {
+	var compareto []int
+	if boundaries == nil {
+		compareto = []int{32750, 32747, 4746, 4738, 37504, 31762}
+	} else {
+		compareto = []int{49983, 49980, 21979, 21971, 4294939264, 48995} // holy crap do you see it?
+	}
+	var added T
+	var available T
 	sm, err := New[T, V](
 		SyncConcurrency,
 		workSlice,
@@ -34,43 +42,52 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 		return
 	}
 	for i := 0; i < 16; i++ {
-		sm.Set(T(i), V(1))
+		available, _ = sm.Set(T(i), V(1))
 	}
-	added, err := sm.BookAndSet(2)
+	added, available, err = sm.BookAndSet(2)
 	if err != nil {
 		t.Error("unable to call BookAndSet", err)
 	} else if added != 16 {
 		t.Error("result should be 16", added)
 	}
-	added, err = sm.BookAndSet(3)
+	if compareto[0] != int(available) {
+		t.Error("remaining should be 32750", available)
+	}
+	added, available, err = sm.BookAndSet(3)
 	if err != nil {
 		t.Error("unable to call BookAndSet", err)
 	} else if added != 17 {
 		t.Error("result should be 16", added)
 	}
 	sm.Unset(12)
-	added, err = sm.BookAndSet(4)
+	added, available, err = sm.BookAndSet(4)
 	if err != nil {
 		t.Error("unable to call BookAndSet", err)
 	} else if added != 12 {
 		t.Error("result should be 12", added)
 	}
+	if compareto[1] != int(available) {
+		t.Error("remaining should be 32747", available)
+	}
 
 	for i := 0; i < 28000; i++ {
 		sm.Set(T(i), V(i))
 	}
-	added, err = sm.BookAndSet(100)
+	added, available, err = sm.BookAndSet(100)
 	v := 28000
 	if err != nil {
 		t.Error("unable to call BookAndSet", err)
 	} else if added != T(v) {
 		t.Error("result should be 28000", added)
 	}
+	if compareto[2] != int(available) {
+		t.Error("remaining should be 4746", available)
+	}
 	for _, v := range []uint16{14789, 14790, 17791, 21111} {
 		sm.Unset(T(v))
 	}
 	for _, v := range []uint16{14789, 14790, 17791, 21111} {
-		added, err = sm.BookAndSet(101)
+		added, available, err = sm.BookAndSet(101)
 		if err != nil {
 			t.Error("unable to call BookAndSet", err)
 		} else if added != T(v) {
@@ -80,8 +97,11 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 	for i := 0; i < sliceSize; i++ {
 		sm.Set(T(i), V(i))
 	}
+	if compareto[3] != int(available) {
+		t.Error("remaining should be 4738", available)
+	}
 	v = 200
-	_, err = sm.BookAndSet(V(v))
+	_, available, err = sm.BookAndSet(V(v))
 	if err == nil {
 		t.Error("should have errored out calling BookAndSet on a full set", err)
 	} else if !strings.HasPrefix(err.Error(), "SlotMachine: No ") {
@@ -89,7 +109,7 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 	}
 	sm.Unset(0)
 	v = 201
-	added, err = sm.BookAndSet(V(v))
+	added, available, err = sm.BookAndSet(V(v))
 	if err != nil {
 		t.Error("unable to call BookAndSet", err)
 	} else if added != 0 {
@@ -105,7 +125,11 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 	for i := 0; i < 1000; i++ {
 		sm2.Set(T(i), V(i))
 	}
-	addedbunch, err := sm2.BookAndSetBatch(5, V(v))
+	if compareto[4] != int(available) {
+		t.Error("remaining should be 37504", available)
+	}
+	var addedbunch []T
+	addedbunch, available, err = sm2.BookAndSetBatch(5, V(v))
 	if err != nil {
 		t.Error("unable to call BookAndSetBatch", err)
 	} else {
@@ -114,6 +138,9 @@ func (s *SMTester[T, V]) Exercise(t *testing.T, workSlice *[]V, sliceSize int, b
 				t.Error("result should be 1000 + i", addedbunch[i])
 			}
 		}
+	}
+	if compareto[5] != int(available) {
+		t.Error("remaining should be 31762", available)
 	}
 }
 
@@ -154,20 +181,21 @@ func TestBucketSizeIs16Boundaries(t *testing.T) {
 
 func testConcurrent(t *testing.T, sm SlotMachine[uint32, uint16], threads int, batchSize int) {
 	var wg sync.WaitGroup
+	var available uint32
+	var err error
 	wg.Add(threads)
 	for i := 0; i < threads; i++ {
 		go func(idx int) {
 			defer wg.Done()
 			counter := 0
 			for i := 0; i < batchSize; i++ {
-				added, err := sm.BookAndSet(uint16(i))
+				_, available, err = sm.BookAndSet(uint16(i))
 				if err != nil {
 					t.Error(err)
 				}
-				counter++
-				if added == 0 {
+				if available != 0 {
 				}
-				//t.Logf("counter#%d: %d", idx, added)
+				counter++
 			}
 		}(i)
 	}
