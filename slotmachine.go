@@ -36,7 +36,7 @@ type SlotMachineStruct[T constraints.Integer, V any] struct {
 	bucketLevels *[][]T
 	m            sync.Mutex
 	debug        bool
-	available    T
+	available    uint
 }
 
 type SlotMachine[T constraints.Integer, V any] interface {
@@ -48,10 +48,10 @@ type SlotMachine[T constraints.Integer, V any] interface {
 		bucketLevels *[][]T,
 		boundaries *Boundaries,
 	)
-	Set(slotidx T, value V) (T, error)
-	Unset(slotidx T) (T, error)
-	BookAndSet(value V) (T, T, error)
-	BookAndSetBatch(slotcount T, value V) ([]T, T, error)
+	Set(slotidx T, value V) (uint, error)
+	Unset(slotidx T) (uint, error)
+	BookAndSet(value V) (T, uint, error)
+	BookAndSetBatch(slotcount T, value V) ([]T, uint, error)
 	DumpLayout()
 }
 
@@ -79,7 +79,7 @@ func (s *SlotMachineStruct[T, V]) checkBoundaries(slotidx T) Validated {
 	return InBound
 }
 
-func (s *SlotMachineStruct[T, V]) set(slotidx T, value V) (T, error) {
+func (s *SlotMachineStruct[T, V]) set(slotidx T, value V) (uint, error) {
 	if s.checkBoundaries(slotidx) == OutOfBound {
 		return s.available, fmt.Errorf("slot index %d is out of bounds", slotidx)
 	}
@@ -89,6 +89,9 @@ func (s *SlotMachineStruct[T, V]) set(slotidx T, value V) (T, error) {
 	level := (*s.bucketLevels)[len(*s.bucketLevels)-1]
 	slicesize := len(*s.slice) / len(level)
 	bucket, offset := int(slotidx)/slicesize, int(slotidx)%slicesize
+	if level[bucket]&(1<<offset) != 0 {
+		return s.available, nil
+	}
 	level[bucket] |= (1 << offset)
 
 	s.available--
@@ -116,7 +119,7 @@ func (s *SlotMachineStruct[T, V]) set(slotidx T, value V) (T, error) {
 	return s.available, nil
 }
 
-func (s *SlotMachineStruct[T, V]) unset(slotidx T) (T, error) {
+func (s *SlotMachineStruct[T, V]) unset(slotidx T) (uint, error) {
 	if s.checkBoundaries(slotidx) == OutOfBound {
 		return s.available, fmt.Errorf("slot index %d is out of bounds", slotidx)
 	}
@@ -128,6 +131,9 @@ func (s *SlotMachineStruct[T, V]) unset(slotidx T) (T, error) {
 	level := (*s.bucketLevels)[len(*s.bucketLevels)-1]
 	slicesize := len(*s.slice) / len(level)
 	bucket, offset := int(slotidx)/slicesize, int(slotidx)%slicesize
+	if level[bucket]&(1<<offset) == 0 {
+		return s.available, nil
+	}
 	level[bucket] &^= (1 << offset)
 
 	s.available++
@@ -149,7 +155,7 @@ func (s *SlotMachineStruct[T, V]) unset(slotidx T) (T, error) {
 	return s.available, nil
 }
 
-func (s *SlotMachineStruct[T, V]) bookAndSet(value V) (T, T, error) {
+func (s *SlotMachineStruct[T, V]) bookAndSet(value V) (T, uint, error) {
 	var level []T
 	var found bool
 	var bucket int
@@ -290,26 +296,26 @@ func (s *NoConcurrencySlotMachine[T, V]) Init(
 	s.st.full = T(full)
 	s.st.bucketLevels = bucketLevels
 	s.st.boundaries = *boundaries
-	s.st.available = T(s.st.boundaries.Upper) - T(s.st.boundaries.Lower)
+	s.st.available = uint(s.st.boundaries.Upper) - uint(s.st.boundaries.Lower) + 1
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) Set(slotidx T, value V) (T, error) {
+func (s *NoConcurrencySlotMachine[T, V]) Set(slotidx T, value V) (uint, error) {
 	return s.st.set(slotidx, value)
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) Unset(slotidx T) (T, error) {
+func (s *NoConcurrencySlotMachine[T, V]) Unset(slotidx T) (uint, error) {
 	return s.st.unset(slotidx)
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, T, error) {
+func (s *NoConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, uint, error) {
 	return s.st.bookAndSet(value)
 }
 
-func (s *NoConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, T, error) {
+func (s *NoConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, uint, error) {
 	slots := []T{}
 	var n T
 	var err error
-	var available T
+	var available uint
 	for i := 0; i < int(slotcount); i++ {
 		n, available, err = s.st.bookAndSet(value)
 		if err != nil {
@@ -343,37 +349,37 @@ func (s *SyncConcurrencySlotMachine[T, V]) Init(
 	s.st.full = T(full)
 	s.st.bucketLevels = bucketLevels
 	s.st.boundaries = *boundaries
-	s.st.available = T(s.st.boundaries.Upper) - T(s.st.boundaries.Lower)
+	s.st.available = uint(s.st.boundaries.Upper) - uint(s.st.boundaries.Lower) + 1
 }
 
-func (s *SyncConcurrencySlotMachine[T, V]) Set(slotidx T, value V) (T, error) {
+func (s *SyncConcurrencySlotMachine[T, V]) Set(slotidx T, value V) (uint, error) {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
 	return s.st.set(slotidx, value)
 }
 
-func (s *SyncConcurrencySlotMachine[T, V]) Unset(slotidx T) (T, error) {
+func (s *SyncConcurrencySlotMachine[T, V]) Unset(slotidx T) (uint, error) {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
 	return s.st.unset(slotidx)
 }
 
-func (s *SyncConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, T, error) {
+func (s *SyncConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, uint, error) {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
 	return s.st.bookAndSet(value)
 }
 
-func (s *SyncConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, T, error) {
+func (s *SyncConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, uint, error) {
 	s.st.m.Lock()
 	defer s.st.m.Unlock()
 
 	slots := []T{}
 	var n T
-	var available T
+	var available uint
 	var err error
 	for i := 0; i < int(slotcount); i++ {
 		n, available, err = s.st.bookAndSet(value)
@@ -400,7 +406,7 @@ const (
 
 type response[T constraints.Integer] struct {
 	slotidx   *T
-	available T
+	available uint
 	err       *error
 }
 
@@ -430,7 +436,7 @@ func (s *ChannelConcurrencySlotMachine[T, V]) Init(
 	s.st.full = T(full)
 	s.st.bucketLevels = bucketLevels
 	s.st.boundaries = *boundaries
-	s.st.available = T(s.st.boundaries.Upper) - T(s.st.boundaries.Lower)
+	s.st.available = uint(s.st.boundaries.Upper) - uint(s.st.boundaries.Lower) + 1
 
 	s.transactor = make(chan *transact[T, V], 8)
 	go func() {
@@ -453,21 +459,21 @@ func (s *ChannelConcurrencySlotMachine[T, V]) Init(
 	}()
 }
 
-func (s *ChannelConcurrencySlotMachine[T, V]) Set(slotidx T, value V) (T, error) {
+func (s *ChannelConcurrencySlotMachine[T, V]) Set(slotidx T, value V) (uint, error) {
 	tr := &transact[T, V]{ttype: TransactionSet, slotidx: slotidx, value: value, response: make(chan response[T])}
 	s.transactor <- tr
 	response := <-tr.response
 	return response.available, *response.err
 }
 
-func (s *ChannelConcurrencySlotMachine[T, V]) Unset(slotidx T) (T, error) {
+func (s *ChannelConcurrencySlotMachine[T, V]) Unset(slotidx T) (uint, error) {
 	tr := &transact[T, V]{ttype: TransactionUnset, slotidx: slotidx, response: make(chan response[T])}
 	s.transactor <- tr
 	response := <-tr.response
 	return response.available, *response.err
 }
 
-func (s *ChannelConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, T, error) {
+func (s *ChannelConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, uint, error) {
 	tr := &transact[T, V]{ttype: TransactionBookAndSet, value: value, response: make(chan response[T])}
 	s.transactor <- tr
 	response := <-tr.response
@@ -475,10 +481,10 @@ func (s *ChannelConcurrencySlotMachine[T, V]) BookAndSet(value V) (T, T, error) 
 }
 
 // Warning! At this time, this  function does not return consecutive slots -- it should when using Sync
-func (s *ChannelConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, T, error) {
+func (s *ChannelConcurrencySlotMachine[T, V]) BookAndSetBatch(slotcount T, value V) ([]T, uint, error) {
 	slots := []T{}
 	var n T
-	var available T
+	var available uint
 	var err error
 	for i := 0; i < int(slotcount); i++ {
 		tr := &transact[T, V]{ttype: TransactionBookAndSet, value: value, response: make(chan response[T])}
